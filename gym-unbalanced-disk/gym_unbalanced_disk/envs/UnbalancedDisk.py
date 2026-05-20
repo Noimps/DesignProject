@@ -15,7 +15,7 @@ class UnbalancedDisk(gym.Env):
                     |
                     0  = starting location
     '''
-    def __init__(self, umax=3., dt = 0.025, render_mode='human'):
+    def __init__(self, umax=20., dt = 0.025, render_mode='human'):
         ############# start do not edit  ################
         self.omega0 = 11.339846957335382
         self.delta_th = 0
@@ -191,9 +191,12 @@ if __name__ == '__main__':
     Y = [obs]
     env.render()
     try:
+        act = [3, -3]
+        now = time.time()
         for i in range(100):
             time.sleep(1/24)
-            u = 3#env.action_space.sample()
+            # switch every 2 seconds between 3 and -3, otherwise do not apply any action
+            u = act[i//(2*24)%2]
             obs, reward, terminated, truncated, info = env.step(u)
             Y.append(obs)
             env.render()
