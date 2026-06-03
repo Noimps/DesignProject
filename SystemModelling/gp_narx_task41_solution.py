@@ -1,4 +1,4 @@
-
+import joblib
 from pathlib import Path
 import argparse
 import time
@@ -287,6 +287,27 @@ def main():
     )
     model.fit(u_train, th_train)
 
+    # Save trained GP model 
+    model_bundle = {
+        "gp": model.gp,
+        "x_scaler": model.x_scaler,
+        "y_scaler": model.y_scaler,
+        "na": model.na,
+        "nb": model.nb,
+        "max_train_samples": model.max_train_samples,
+        "seed": model.seed,
+        "kernel": str(model.gp.kernel_),
+    }
+
+    model_path = out_dir / f"gp_narx_bundle_na{args.na}_nb{args.nb}.joblib"
+    joblib.dump(model_bundle, model_path)
+
+    print("\nSaved GP model bundle:")
+    print(model_path)
+
+
+    model.fit(u_train, th_train)
+
     y_true_pred, y_pred, y_std = model.one_step_prediction(
         u_val, th_val,
         return_std=True
@@ -367,7 +388,6 @@ def main():
     print(f"python {benchmark_dir / 'submission-file-checker.py'} "
           f"{out_dir / 'gp_hidden_simulation_submission.npz'} {sim_path}")
 
-    print("\nDone.")
 
 
 if __name__ == "__main__":
