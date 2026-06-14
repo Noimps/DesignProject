@@ -1,5 +1,6 @@
 from pathlib import Path
 import argparse
+import sys
 import time
 import math
 import random
@@ -13,15 +14,36 @@ import torch.optim as optim
 from torch.distributions import Normal
 
 
+import gymnasium as gym
 
 
+def _ensure_gym_unbalanced_disk_on_path():
+    """
+    The gym_unbalanced_disk package ships inside this repository
+    (<repo>/gym-unbalanced-disk). If it has not been pip-installed, add that
+    folder to sys.path so the import (and its env registration) still works.
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    pkg_dir = repo_root / "gym-unbalanced-disk"
+    if pkg_dir.is_dir() and str(pkg_dir) not in sys.path:
+        sys.path.insert(0, str(pkg_dir))
+
+
+# Importing gym_unbalanced_disk has the side effect of registering the
+# 'unbalanced-disk-*' environments with gymnasium, so it must happen before
+# any gym.make(...) call.
 try:
-    import gymnasium as gym
-    import gym_unbalanced_disk
-except ImportError as e:
-    raise ImportError(
-        "Could not import gym_unbalanced_disk.\n"
-    ) from e
+    import gym_unbalanced_disk  # noqa: F401  (imported for registration side effect)
+except ImportError:
+    _ensure_gym_unbalanced_disk_on_path()
+    try:
+        import gym_unbalanced_disk  # noqa: F401
+    except ImportError as e:
+        raise ImportError(
+            "Could not import gym_unbalanced_disk. Install it with "
+            "`pip install -e gym-unbalanced-disk` from the repository root, "
+            "or make sure the 'gym-unbalanced-disk' folder is on PYTHONPATH.\n"
+        ) from e
 
 
 
@@ -71,22 +93,36 @@ def safe_reset(env):
 
 def safe_step(env, action):
     """
+    The unbalanced-disk environment expects a scalar voltage input, not an
+    array, so convert to a scalar float before env.step(...).
 
-    The unbalanced-disk environment expects a scalar voltage input, not an array. convert to a scalar float before env.step(...).
+    The action is clipped to the environment's configured voltage limit
+    (env.umax) rather than a hard-coded value, so it respects --umax.
+
+    Returns (obs, reward, terminated, truncated, info), keeping termination and
+    truncation separate (handling both the new 5-tuple and old 4-tuple APIs).
     """
     action = np.asarray(action).reshape(-1)
     action_scalar = float(action[0])
-    action_scalar = float(np.clip(action_scalar, -3.0, 3.0))
+
+    limit = float(getattr(env, "umax", 3.0))
+    action_scalar = float(np.clip(action_scalar, -limit, limit))
 
     out = env.step(action_scalar)
 
     if len(out) == 5:
         obs, reward, terminated, truncated, info = out
-        done = terminated or truncated
     else:
         obs, reward, done, info = out
+        terminated, truncated = bool(done), False
 
-    return np.asarray(obs, dtype=np.float32), float(reward), bool(done), info
+    return (
+        np.asarray(obs, dtype=np.float32),
+        float(reward),
+        bool(terminated),
+        bool(truncated),
+        info,
+    )
 
 
 # Observation and reward utilities
@@ -292,8 +328,10 @@ def collect_rollout(
     actions = []
     log_probs = []
     rewards = []
-    dones = []
+    terminateds = []
+    truncateds = []
     values = []
+    next_values = []
 
     episode_rewards = []
     current_episode_reward = 0.0
@@ -310,7 +348,7 @@ def collect_rollout(
 
         action_np = action_t.detach().cpu().numpy().reshape(-1)
 
-        next_obs, env_reward, done, info = safe_step(env, action_np)
+        next_obs, env_reward, terminated, truncated, info = safe_step(env, action_np)
 
         if use_env_reward:
             reward = env_reward
@@ -322,15 +360,36 @@ def collect_rollout(
         current_episode_reward += reward
         steps_in_episode += 1
 
+        # Reaching the episode-step cap is a time-limit *truncation*, not a true
+        # terminal state: the real dynamics would continue, so the return must
+        # bootstrap with V(next_state) rather than being cut off at zero.
         if steps_in_episode >= episode_steps:
-            done = True
+            truncated = True
+
+        done = terminated or truncated
+
+        # For a truncated (but not terminated) step we need the value of the
+        # state we are about to leave behind, so its return can be bootstrapped.
+        if truncated and not terminated:
+            with torch.no_grad():
+                next_state = torch.tensor(
+                    next_state_np,
+                    dtype=torch.float32,
+                    device=device
+                ).unsqueeze(0)
+                _, _, nv = model.forward(next_state)
+                next_value_t = nv.squeeze(0)
+        else:
+            next_value_t = torch.zeros((), dtype=torch.float32, device=device)
 
         states.append(state.squeeze(0))
         actions.append(action_t.squeeze(0))
         log_probs.append(log_prob_t.squeeze(0))
         rewards.append(torch.tensor(reward, dtype=torch.float32, device=device))
-        dones.append(torch.tensor(done, dtype=torch.float32, device=device))
+        terminateds.append(torch.tensor(float(terminated), dtype=torch.float32, device=device))
+        truncateds.append(torch.tensor(float(truncated), dtype=torch.float32, device=device))
         values.append(value_t.squeeze(0))
+        next_values.append(next_value_t)
 
         if done:
             episode_rewards.append(current_episode_reward)
@@ -344,6 +403,9 @@ def collect_rollout(
             obs = next_obs
             state_np = next_state_np
 
+    # Bootstrap value for the (possibly unfinished) final transition. This is
+    # only used for trailing steps that did not end an episode; terminated and
+    # truncated steps override it in the recursion below.
     state = torch.tensor(
         state_np,
         dtype=torch.float32,
@@ -351,21 +413,27 @@ def collect_rollout(
     ).unsqueeze(0)
 
     with torch.no_grad():
-        _, _, next_value = model.forward(state)
-        next_value = next_value.squeeze(0)
+        _, _, bootstrap_value = model.forward(state)
+        bootstrap_value = bootstrap_value.squeeze(0)
 
     states = torch.stack(states)
     actions = torch.stack(actions)
     log_probs = torch.stack(log_probs)
     rewards = torch.stack(rewards)
-    dones = torch.stack(dones)
+    terminateds = torch.stack(terminateds)
+    truncateds = torch.stack(truncateds)
     values = torch.stack(values)
+    next_values = torch.stack(next_values)
 
     returns = []
-    G = next_value
+    G = bootstrap_value
 
     for t in reversed(range(rollout_steps)):
-        G = rewards[t] + gamma * G * (1.0 - dones[t])
+        # terminated -> no bootstrap          (G = reward)
+        # truncated  -> bootstrap V(next_state), do not carry the future G
+        # otherwise  -> standard discounted accumulation
+        bootstrap = truncateds[t] * next_values[t] + (1.0 - truncateds[t]) * G
+        G = rewards[t] + gamma * bootstrap * (1.0 - terminateds[t])
         returns.insert(0, G)
 
     returns = torch.stack(returns)
@@ -378,7 +446,8 @@ def collect_rollout(
         "actions": actions,
         "log_probs": log_probs,
         "rewards": rewards,
-        "dones": dones,
+        "terminateds": terminateds,
+        "truncateds": truncateds,
         "values": values,
         "returns": returns.detach(),
         "advantages": advantages.detach(),
@@ -600,7 +669,8 @@ def evaluate_policy(args):
         action_np = action_t.cpu().numpy().reshape(-1)
         action_np = np.clip(action_np, -args.umax, args.umax)
 
-        next_obs, env_reward, done, info = safe_step(env, action_np)
+        next_obs, env_reward, terminated, truncated, info = safe_step(env, action_np)
+        done = terminated or truncated
 
         if args.use_env_reward:
             reward = env_reward
