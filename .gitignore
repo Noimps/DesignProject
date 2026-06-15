@@ -45,7 +45,6 @@ wandb/
 *.npz
 
 # Archives
-*.zip
 *.tar
 *.tar.gz
 *.rar
@@ -57,3 +56,5 @@ dist/
 
 # OS files
 Thumbs.db
+
+DesignProject/Part2_Control/A2C/tensorboard_logs/
