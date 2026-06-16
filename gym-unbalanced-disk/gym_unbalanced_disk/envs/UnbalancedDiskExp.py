@@ -1,6 +1,7 @@
 
 import gymnasium as gym
 from gymnasium import spaces
+from matplotlib.pylab import seed
 import numpy as np
 from scipy.integrate import solve_ivp
 from os import path
@@ -104,7 +105,8 @@ class UnbalancedDisk_exp(gym.Env):
         reward = self.reward_fun(self)
         return obs, reward, False, False, {}
         
-    def reset(self,seed=None):
+    def reset(self, *, seed=None, options=None):
+        super().reset(seed=seed)
         theta_now = self.get_obs()[0]
         t_start = time.time()
         while time.time()-t_start<30:
