@@ -63,21 +63,25 @@ class UnbalancedDisk(gym.Env):
         self.reset()
 
     def reward_fun(self):
-        upright = (1 - np.cos(self.th)) / 2          # 0 bottom, 1 top
+        """The reward function that evaluates how long and well the agent can keep the disk upright with a sharp peak at the top."""
+        upright = (1 - np.cos(self.th)) / 2
+        # angle distance to the top, wrapped to [-pi, pi]
+        d_top = np.arctan2(np.sin(self.th - np.pi), np.cos(self.th - np.pi))
+        bonus = np.exp(-(d_top / 0.25)**2)        # sharp, ~14° width, peak 1.0
+        return upright + 0.5 * bonus
+    
+    def evaluation_reward_fun(self):
+        """The evaluation reward function that evaluates how long and well the agent can keep the disk upright."""
+        upright = (1 - np.cos(self.th)) / 2
 
-        # normalize omega (Speed) to ~[-1, 1] for reward shaping.
-        omega_n = np.clip(self.omega / 40.0, -1.0, 1.0)
-
-        if np.abs(np.cos(self.th)) < -0.9:                    # within ~25° of upright
-            
-
-        return upright
+        return upright 
 
 
 
 
     def step(self, action):
         #convert action to u
+    
         self.u = action #continuous
         # self.u = [-3,-1,0,1,3][action] #discrate
         # self.u = [-3,3][action] #discrate
@@ -95,6 +99,7 @@ class UnbalancedDisk(gym.Env):
         ##### End do not edit   #####
 
         reward = self.reward_fun()
+
         # Check if episode is done
         self.current_step += 1
         truncated = self.current_step >= self.max_steps
