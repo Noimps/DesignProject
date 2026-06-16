@@ -4,6 +4,7 @@ from gymnasium import spaces
 import numpy as np
 from scipy.integrate import solve_ivp
 from os import path
+import time
 
 class UnbalancedDisk(gym.Env):
     '''
@@ -15,7 +16,11 @@ class UnbalancedDisk(gym.Env):
                     |
                     0  = starting location
     '''
-    def __init__(self, umax=20., dt = 0.025, render_mode='human'):
+    # Declares which render modes the env supports. Without this, gymnasium's
+    # passive env checker (used by gym.make) rejects render_mode='human'.
+    metadata = {"render_modes": ["human"], "render_fps": 40}
+
+    def __init__(self, umax=20., dt = 0.025, max_steps=200, render_mode='human'):
         ############# start do not edit  ################
         self.omega0 = 11.339846957335382
         self.delta_th = 0
@@ -43,12 +48,33 @@ class UnbalancedDisk(gym.Env):
         high = [float('inf'),40]
         self.observation_space = spaces.Box(low=np.array(low,dtype=np.float32),high=np.array(high,dtype=np.float32),shape=(2,))
 
-        self.reward_fun = lambda self: np.exp(-(self.th%(2*np.pi)-np.pi)**2/(2*(np.pi/7)**2)) #example reward function, change this!
+        # Dense reward based on disk height: 0 at the bottom (theta = 0),
+        # 0.5 at horizontal, 1.0 at upright (theta = pi). Unlike a narrow
+        # Gaussian, this has a non-zero gradient at every angle, so the agent
+        # always has a signal telling it which way is "up" - essential for the
+        # agent to discover the swing-up.
         
         self.render_mode = render_mode
         self.viewer = None
         self.u = 0 #for visual
+
+        self.max_steps = max_steps
+        self.reached_top = False
         self.reset()
+
+    def reward_fun(self):
+        upright = (1 - np.cos(self.th)) / 2          # 0 bottom, 1 top
+
+        # normalize omega (Speed) to ~[-1, 1] for reward shaping.
+        omega_n = np.clip(self.omega / 40.0, -1.0, 1.0)
+
+        if np.abs(np.cos(self.th)) < -0.9:                    # within ~25° of upright
+            
+
+        return upright
+
+
+
 
     def step(self, action):
         #convert action to u
@@ -68,19 +94,28 @@ class UnbalancedDisk(gym.Env):
         self.th, self.omega = sol.y[:,-1]
         ##### End do not edit   #####
 
-        reward = self.reward_fun(self)
-        return self.get_obs(), reward, False, False, {}
+        reward = self.reward_fun()
+        # Check if episode is done
+        self.current_step += 1
+        truncated = self.current_step >= self.max_steps
+        return self.get_obs(), reward, False, truncated, {}
          
-    def reset(self,seed=None):
-        self.th = np.random.normal(loc=0,scale=0.001)
-        self.omega = np.random.normal(loc=0,scale=0.001)
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        self.th = self.np_random.normal(loc=0, scale=0.001)
+        self.omega = self.np_random.normal(loc=0, scale=0.001)
+        # Reset step counter and action for rendering
+        self.current_step = 0
+        self.reached_top = False
         self.u = 0
         return self.get_obs(), {}
 
     def get_obs(self):
         self.th_noise = self.th + np.random.normal(loc=0,scale=0.001) #do not edit
         self.omega_noise = self.omega + np.random.normal(loc=0,scale=0.001) #do not edit
-        return np.array([self.th_noise, self.omega_noise])
+        # Match the float32 observation_space (avoids gymnasium dtype / "not in
+        # observation space" warnings caused by the default float64 array).
+        return np.array([self.th_noise, self.omega_noise], dtype=np.float32)
 
     def render(self):
         import pygame
