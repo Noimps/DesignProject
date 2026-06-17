@@ -58,3 +58,6 @@ dist/
 Thumbs.db
 
 DesignProject/Part2_Control/A2C/tensorboard_logs/
+DesignProject/Part2_Control/A2C/hpo/
+
+*best_model.zip

@@ -20,7 +20,7 @@ class UnbalancedDisk(gym.Env):
     # passive env checker (used by gym.make) rejects render_mode='human'.
     metadata = {"render_modes": ["human"], "render_fps": 40}
 
-    def __init__(self, umax=20., dt = 0.025, max_steps=200, render_mode='human'):
+    def __init__(self, umax=20., dt = 0.025, max_steps=200, robust=False,is_evaluation=False, render_mode='human'):
         ############# start do not edit  ################
         self.omega0 = 11.339846957335382
         self.delta_th = 0
@@ -46,6 +46,7 @@ class UnbalancedDisk(gym.Env):
         # self.action_space = spaces.Discrete(5) #discrete
         low = [-float('inf'),-40] 
         high = [float('inf'),40]
+        
         self.observation_space = spaces.Box(low=np.array(low,dtype=np.float32),high=np.array(high,dtype=np.float32),shape=(2,))
 
         # Dense reward based on disk height: 0 at the bottom (theta = 0),
@@ -60,6 +61,9 @@ class UnbalancedDisk(gym.Env):
 
         self.max_steps = max_steps
         self.reached_top = False
+        self.robust = robust
+        self.is_evaluation = is_evaluation
+        self.max_eval_reward = max_steps
         self.reset()
 
     def reward_fun(self):
@@ -68,6 +72,7 @@ class UnbalancedDisk(gym.Env):
         # angle distance to the top, wrapped to [-pi, pi]
         d_top = np.arctan2(np.sin(self.th - np.pi), np.cos(self.th - np.pi))
         bonus = np.exp(-(d_top / 0.25)**2)        # sharp, ~14° width, peak 1.0
+        
         return upright + 0.5 * bonus
     
     def evaluation_reward_fun(self):
@@ -77,14 +82,17 @@ class UnbalancedDisk(gym.Env):
         return upright 
 
 
-
-
     def step(self, action):
         #convert action to u
     
         self.u = action #continuous
         # self.u = [-3,-1,0,1,3][action] #discrate
         # self.u = [-3,3][action] #discrate
+        if self.robust:
+            self.u += np.random.normal(loc=0, scale=0.5)   # actuator amplitude noise
+            if np.random.rand() < 0.05:                     # 5% dropped command:
+                self.u = self.u_prev                        # amplifier holds last torque
+        self.u_prev = self.u
 
         ##### Start Do not edit ######
         self.u = np.clip(self.u,-self.umax,self.umax)
@@ -98,7 +106,10 @@ class UnbalancedDisk(gym.Env):
         self.th, self.omega = sol.y[:,-1]
         ##### End do not edit   #####
 
-        reward = self.reward_fun()
+        if self.is_evaluation:
+            reward = self.evaluation_reward_fun()
+        else:
+            reward = self.reward_fun()
 
         # Check if episode is done
         self.current_step += 1
@@ -113,6 +124,7 @@ class UnbalancedDisk(gym.Env):
         self.current_step = 0
         self.reached_top = False
         self.u = 0
+        self.u_prev = 0
         return self.get_obs(), {}
 
     def get_obs(self):
@@ -141,6 +153,7 @@ class UnbalancedDisk(gym.Env):
         self.surf.fill((255, 255, 255))
         
         gfxdraw.filled_circle( #central blue disk
+        
             self.surf,
             screen_width//2,
             screen_height//2,
@@ -212,8 +225,8 @@ class UnbalancedDisk(gym.Env):
 
 class UnbalancedDisk_sincos(UnbalancedDisk):
     """docstring for UnbalancedDisk_sincos"""
-    def __init__(self, umax=3., dt = 0.025):
-        super(UnbalancedDisk_sincos, self).__init__(umax=umax, dt=dt)
+    def __init__(self, umax=3., dt = 0.025, is_evaluation=False,  max_steps=200, robust=False, render_mode='human'):
+        super(UnbalancedDisk_sincos, self).__init__(umax=umax, dt=dt, is_evaluation=is_evaluation, max_steps=max_steps, robust=robust, render_mode=render_mode)
         low = [-1,-1,-40.] 
         high = [1,1,40.]
         self.observation_space = spaces.Box(low=np.array(low,dtype=np.float32),high=np.array(high,dtype=np.float32),shape=(3,))
