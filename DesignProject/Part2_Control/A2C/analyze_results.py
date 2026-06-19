@@ -179,12 +179,18 @@ def infer_findings(df: pd.DataFrame, agg: pd.DataFrame) -> str:
         f"({(df.algo=='ppo').sum()} PPO + {(df.algo=='a2c').sum()} A2C runs)._\n")
 
     best, worst = agg.iloc[0], agg.iloc[-1]
+    n_cap = int((df["mean_reward"] >= 179.9).sum())
     add("## Overall")
     add(f"- **Best config:** `{best['config']}` — return "
         f"**{best.reward_mean:.1f} ± {best.reward_std:.1f}** over "
         f"{best.n_seeds} seeds, in {best.time_mean:.1f} min avg.")
     add(f"- **Worst config:** `{worst['config']}` — "
-        f"{worst.reward_mean:.1f} ± {worst.reward_std:.1f}.\n")
+        f"{worst.reward_mean:.1f} ± {worst.reward_std:.1f}.")
+    add(f"- **Censoring caveat:** training stopped at reward 180 (0.9×max), so "
+        f"{n_cap}/{len(df)} runs (all PPO·sin/cos) are right-censored at 180 — "
+        "their return is a *floor*, not a ceiling. Reward cannot separate the "
+        "capped configs; for those, steps-to-threshold is the real metric (see "
+        "`statistical_analysis.md`).\n")
 
     ppo, a2c = df[df.algo == "ppo"], df[df.algo == "a2c"]
     add("## Algorithm: PPO vs A2C")
@@ -223,10 +229,14 @@ def infer_findings(df: pd.DataFrame, agg: pd.DataFrame) -> str:
     add(textwrap.dedent(f"""\
         - **Use PPO.** Higher return, faster, and low seed variance. A2C is both
           weaker and unstable across seeds on this task.
-        - Several PPO configs reach the same return ceiling within error bars;
-          the recommended controller is the cheapest such config
-          (`{best['config']}`), and robust-trained PPO matches it at no cost,
-          which is the result that matters for sim-to-real.
+        - The top PPO configs are tied on return only because they are all
+          censored at the 180 cap; the recommended controller is therefore the
+          one that reaches the cap fastest and most reliably
+          (`{best['config']}`).
+        - Robust-trained PPO reaches the same cap, so it costs no *final return*
+          — but it is not free: it needs more steps to get there (and with the
+          tuned reward only 4/6 seeds reach the cap), trading sample-cost for
+          sim-to-real robustness. See `statistical_analysis.md` §3.
         - Reporting mean ± std over {n_seeds.min()}–{n_seeds.max()} seeds removes
           the single-seed confound from the earlier write-up.
         """))
