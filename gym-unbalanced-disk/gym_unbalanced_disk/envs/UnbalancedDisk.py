@@ -1,4 +1,3 @@
-
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
@@ -20,7 +19,15 @@ class UnbalancedDisk(gym.Env):
     # passive env checker (used by gym.make) rejects render_mode='human'.
     metadata = {"render_modes": ["human"], "render_fps": 40}
 
-    def __init__(self, umax=20., dt = 0.025, max_steps=200, robust=False,is_evaluation=False, render_mode='human'):
+    def __init__(self, umax=20., dt = 0.025, max_steps=200, base_reward=True, robust=False, is_evaluation=False, reference=False, ref_angle= 15, render_mode='human'):
+        """
+        base_reward: If True, use the original reward function (cosine bowl + sharp Gaussian peak at the top). If False, use the new reward function with a tunable sharp peak at the target angle (Described in PPO/A2C: Reference Tracking).
+        robust: If True, add noise to the action and randomly drop commands to encourage robustness (Described in PPO/A2C: model definition).
+        is_evaluation: If True, use the evaluation reward function (same cosine shape as training, peaked at the target angle) instead of the training reward function (Described in PPO/A2C: Evaluation).
+        reference: If True, the reward peak is ref_angle away from the top; if False, the reward peak is at the top (Described in PPO/A2C: Reference Tracking).
+        ref_angle: The angle ( in degrees) away from the top where the reward peak is located if reference is True (Described in PPO/A2C: Reference Tracking).
+        """
+        
         ############# start do not edit  ################
         self.omega0 = 11.339846957335382
         self.delta_th = 0
@@ -58,36 +65,55 @@ class UnbalancedDisk(gym.Env):
         self.render_mode = render_mode
         self.viewer = None
         self.u = 0 #for visual
-
+        
+        ### ADDED:Configurable reward shaping parameters (compilable with the exercise instructions) ###
         self.max_steps = max_steps
         self.reached_top = False
         self.robust = robust
         self.is_evaluation = is_evaluation
         self.max_eval_reward = max_steps
+        self.ref_angle = np.deg2rad(ref_angle)
+        self.reference = reference
+        self.base_reward = base_reward
+        ### END ADDED ###
         self.reset()
 
-    def reward_fun(self):
-        """The reward function that evaluates how long and well the agent can keep the disk upright with a sharp peak at the top."""
-        upright = (1 - np.cos(self.th)) / 2
-        # angle distance to the top, wrapped to [-pi, pi]
-        d_top = np.arctan2(np.sin(self.th - np.pi), np.cos(self.th - np.pi))
-        bonus = np.exp(-(d_top / 0.25)**2)        # sharp, ~14° width, peak 1.0
-        
-        return upright + 0.5 * bonus
-    
-    def evaluation_reward_fun(self):
-        """The evaluation reward function that evaluates how long and well the agent can keep the disk upright."""
-        upright = (1 - np.cos(self.th)) / 2
+    ### ADDED: Reward function with a tunable sharp peak at the target angle (Described in PPO/A2C: Reference Tracking) ###
+    def _target_angle(self):
+        """Angle of the reward peak: ref_angle away from the top if set, otherwise the top."""
+        return np.pi + self.ref_angle if self.reference else np.pi
 
-        return upright 
+    ### ADDED: Reward function with a tunable sharp peak at the target angle (Described in PPO/A2C) ###
+    def reward_fun(self):
+        """The reward function that evaluates how long and well the agent can keep the disk upright with a sharp peak at the target angle."""
+        target = self._target_angle()
+        # angle distance to the target, wrapped to [-pi, pi]
+        d = np.arctan2(np.sin(self.th - target), np.cos(self.th - target))
+        upright = (1 + np.cos(d)) / 2             # cosine bowl, peak 1.0 at the target
+
+        if self.base_reward:  
+            bonus = 0
+        else:
+            bonus = np.exp(-(d / 0.25)**2)            # sharp, ~14° width, peak 1.0
+            
+
+        return upright + 0.5 * bonus
+
+    ### ADDED: A separate evaluation reward function (Used for PPO/A2C Evaluation) ###
+    def evaluation_reward_fun(self):
+        """The evaluation reward function: same cosine shape as training, peaked at the target angle."""
+        target = self._target_angle()
+        d = np.arctan2(np.sin(self.th - target), np.cos(self.th - target))
+        return (1 + np.cos(d)) / 2
 
 
     def step(self, action):
         #convert action to u
     
-        self.u = action #continuous
-        # self.u = [-3,-1,0,1,3][action] #discrate
-        # self.u = [-3,3][action] #discrate
+        self.u = action 
+
+
+        ### ADDED: Robustness features (Described in PPO/A2C: model definition) ###
         if self.robust:
             self.u += np.random.normal(loc=0, scale=0.5)   # actuator amplitude noise
             if np.random.rand() < 0.05:                     # 5% dropped command:
@@ -106,6 +132,8 @@ class UnbalancedDisk(gym.Env):
         self.th, self.omega = sol.y[:,-1]
         ##### End do not edit   #####
 
+
+        ### Flag for evalutaion reward (Described in PPO/A2C: Evaluation) ###
         if self.is_evaluation:
             reward = self.evaluation_reward_fun()
         else:
@@ -225,8 +253,8 @@ class UnbalancedDisk(gym.Env):
 
 class UnbalancedDisk_sincos(UnbalancedDisk):
     """docstring for UnbalancedDisk_sincos"""
-    def __init__(self, umax=3., dt = 0.025, is_evaluation=False,  max_steps=200, robust=False, render_mode='human'):
-        super(UnbalancedDisk_sincos, self).__init__(umax=umax, dt=dt, is_evaluation=is_evaluation, max_steps=max_steps, robust=robust, render_mode=render_mode)
+    def __init__(self, umax=3., dt = 0.025, base_reward=False, is_evaluation=False,  max_steps=200, robust=False, reference=False, ref_angle=15, render_mode='human'):
+        super(UnbalancedDisk_sincos, self).__init__(umax=umax, dt=dt, base_reward=base_reward, is_evaluation=is_evaluation, max_steps=max_steps, robust=robust, reference=reference, ref_angle=ref_angle, render_mode=render_mode)
         low = [-1,-1,-40.] 
         high = [1,1,40.]
         self.observation_space = spaces.Box(low=np.array(low,dtype=np.float32),high=np.array(high,dtype=np.float32),shape=(3,))

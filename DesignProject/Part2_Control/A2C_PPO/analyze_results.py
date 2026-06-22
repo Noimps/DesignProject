@@ -76,6 +76,12 @@ def aggregate(df: pd.DataFrame) -> pd.DataFrame:
     return agg.sort_values("reward_mean", ascending=False).reset_index(drop=True)
 
 
+def present_algos(df: pd.DataFrame) -> list:
+    """Algorithms that actually have runs in this CSV (so a PPO-only sweep does
+    not emit empty A2C rows / nan stats)."""
+    return [a for a in ("ppo", "a2c") if (df.algo == a).any()]
+
+
 # ---------------------------------------------------------------------------
 # Plots
 # ---------------------------------------------------------------------------
@@ -94,21 +100,24 @@ def plot_reward_by_config(agg: pd.DataFrame):
 
 
 def plot_algo_comparison(df: pd.DataFrame):
+    algos = present_algos(df)
     fig, axes = plt.subplots(1, 3, figsize=(13, 4.5))
     metrics = [("mean_reward", "mean return"),
                ("train_time_min", "training time [min]"),
                ("num_timesteps", "steps trained")]
     for ax, (col, label) in zip(axes, metrics):
-        for i, a in enumerate(("ppo", "a2c")):
+        for i, a in enumerate(algos):
             g = df[df.algo == a][col].values
             ax.bar(i, g.mean(), yerr=g.std(),
                    color=ALGO_COLORS[a], alpha=0.6,
                    error_kw=dict(ecolor="k", capsize=4))
             ax.scatter(np.full(len(g), i) + np.random.uniform(-0.07, 0.07, len(g)),
                        g, color="k", zorder=3, s=12)
-        ax.set_xticks([0, 1]); ax.set_xticklabels(["PPO", "A2C"])
+        ax.set_xticks(range(len(algos)))
+        ax.set_xticklabels([a.upper() for a in algos])
         ax.set_ylabel(label); ax.set_title(label)
-    fig.suptitle("PPO vs A2C  (bar = mean over all runs+seeds, dots = individual runs)")
+    fig.suptitle(" vs ".join(a.upper() for a in algos)
+                 + "  (bar = mean over all runs+seeds, dots = individual runs)")
     fig.tight_layout()
     _save(fig, "algo_comparison.png")
 
@@ -134,9 +143,10 @@ def plot_factor_effects(df: pd.DataFrame):
                ("disturb", ("nominal", "robust"))]
     fig, axes = plt.subplots(1, len(factors), figsize=(13, 4.5), sharey=True)
     width = 0.35
+    algos = present_algos(df)
     for ax, (col, levels) in zip(axes, factors):
         x = np.arange(len(levels))
-        for i, algo in enumerate(("ppo", "a2c")):
+        for i, algo in enumerate(algos):
             means = [df[(df.algo == algo) & (df[col] == lv)]["mean_reward"].mean()
                      for lv in levels]
             stds = [df[(df.algo == algo) & (df[col] == lv)]["mean_reward"].std()
@@ -172,6 +182,8 @@ def _ms(series):
 def infer_findings(df: pd.DataFrame, agg: pd.DataFrame) -> str:
     lines, add = [], lambda s: lines.append(s)
     n_seeds = df.groupby(CONFIG_KEYS).size()
+    algos = present_algos(df)
+    multi_algo = len(algos) > 1
 
     add("# Training-results analysis\n")
     add(f"_{len(df)} runs across {len(agg)} configurations, "
@@ -192,24 +204,31 @@ def infer_findings(df: pd.DataFrame, agg: pd.DataFrame) -> str:
         "capped configs; for those, steps-to-threshold is the real metric (see "
         "`statistical_analysis.md`).\n")
 
-    ppo, a2c = df[df.algo == "ppo"], df[df.algo == "a2c"]
-    add("## Algorithm: PPO vs A2C")
-    add(f"- Return (all runs) — PPO **{ppo.mean_reward.mean():.1f} ± "
-        f"{ppo.mean_reward.std():.1f}** vs A2C **{a2c.mean_reward.mean():.1f} ± "
-        f"{a2c.mean_reward.std():.1f}**.")
-    add(f"- Training time — PPO {ppo.train_time_min.mean():.1f} min vs "
-        f"A2C {a2c.train_time_min.mean():.1f} min.")
-    add(f"- PPO's per-config std stays small (max "
-        f"{agg[agg.algo=='ppo'].reward_std.max():.1f}); A2C's is large (max "
-        f"{agg[agg.algo=='a2c'].reward_std.max():.1f}) — i.e. A2C results are "
-        f"seed-sensitive, which is exactly why multiple seeds were needed.\n")
+    if multi_algo:
+        ppo, a2c = df[df.algo == "ppo"], df[df.algo == "a2c"]
+        add("## Algorithm: PPO vs A2C")
+        add(f"- Return (all runs) — PPO **{ppo.mean_reward.mean():.1f} ± "
+            f"{ppo.mean_reward.std():.1f}** vs A2C **{a2c.mean_reward.mean():.1f} ± "
+            f"{a2c.mean_reward.std():.1f}**.")
+        add(f"- Training time — PPO {ppo.train_time_min.mean():.1f} min vs "
+            f"A2C {a2c.train_time_min.mean():.1f} min.")
+        add(f"- PPO's per-config std stays small (max "
+            f"{agg[agg.algo=='ppo'].reward_std.max():.1f}); A2C's is large (max "
+            f"{agg[agg.algo=='a2c'].reward_std.max():.1f}) — i.e. A2C results are "
+            f"seed-sensitive, which is exactly why multiple seeds were needed.\n")
+    else:
+        only = df[df.algo == algos[0]]
+        add(f"## Algorithm: {algos[0].upper()} only")
+        add(f"- This sweep contains only {algos[0].upper()} runs — return "
+            f"**{only.mean_reward.mean():.1f} ± {only.mean_reward.std():.1f}** "
+            f"over {len(only)} runs, {only.train_time_min.mean():.1f} min avg.\n")
 
     add("## Design factors (mean ± std over runs)")
     for col, label in [("reward_shaping", "Reward shaping"),
                        ("obs", "Observation"),
                        ("disturb", "Disturbance")]:
         add(f"- **{label}:**")
-        for algo in ("ppo", "a2c"):
+        for algo in algos:
             sub = df[df.algo == algo]
             parts = [f"{lv} {_ms(sub[sub[col]==lv]['mean_reward'])}"
                      for lv in sub[col].unique()]
@@ -221,15 +240,20 @@ def infer_findings(df: pd.DataFrame, agg: pd.DataFrame) -> str:
     eff = agg.loc[(agg.reward_mean / agg.time_mean).idxmax()]
     add(f"- Best return-per-minute config: `{eff['config']}` "
         f"({eff.reward_mean:.0f} return in {eff.time_mean:.1f} min).")
+    long_run_note = ("the long runs are the A2C failures" if multi_algo
+                     else "the long runs are the raw-obs configs that never hit "
+                          "the early-stop threshold")
     add(f"- Return vs training time correlates r={corr_t:.2f} across runs; "
-        f"more compute did not buy more return (the long runs are the A2C "
-        f"failures). Early stopping halted converged runs before the 1M cap.\n")
+        f"more compute did not buy more return ({long_run_note}). "
+        f"Early stopping halted converged runs before the 1M cap.\n")
 
     add("## Bottom line")
+    if multi_algo:
+        add(textwrap.dedent(f"""\
+            - **Use PPO.** Higher return, faster, and low seed variance. A2C is both
+              weaker and unstable across seeds on this task."""))
     add(textwrap.dedent(f"""\
-        - **Use PPO.** Higher return, faster, and low seed variance. A2C is both
-          weaker and unstable across seeds on this task.
-        - The top PPO configs are tied on return only because they are all
+        - The top configs are tied on return only because they are all
           censored at the 180 cap; the recommended controller is therefore the
           one that reaches the cap fastest and most reliably
           (`{best['config']}`).
@@ -257,7 +281,10 @@ def main():
 
     print("Generating plots ...")
     plot_reward_by_config(agg)
-    plot_algo_comparison(df)
+    if len(present_algos(df)) > 1:
+        plot_algo_comparison(df)
+    else:
+        print("  skipped algo_comparison.png (single algorithm in CSV)")
     plot_time_vs_reward(agg)
     plot_factor_effects(df)
 

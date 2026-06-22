@@ -1,0 +1,22 @@
+{
+  "order": "(10,7)",
+  "na": 10,
+  "nb": 7,
+  "max_train_samples": 2000,
+  "seed": 21,
+  "n_restarts_optimizer": 3,
+  "training_time_s": 207.48755884170532,
+  "pred_rmse_rad": 0.003708711500768908,
+  "pred_rmse_deg": 0.212493516425688,
+  "pred_mae_rad": 0.002534405039015573,
+  "pred_nrms_percent": 0.7168940795855846,
+  "sim_rmse_rad": 0.04371858024445334,
+  "sim_rmse_deg": 2.504890134311195,
+  "sim_mae_rad": 0.026268662675899196,
+  "sim_nrms_percent": 8.450803288052471,
+  "kernel": "4.24**2 * RBF(length_scale=[100, 100, 100, 38.3, 100, 100, 100, 100, 100, 100, 100, 1.73, 19.1, 41.2, 15.2, 14.8, 8.96]) + WhiteKernel(noise_level=3.76e-05)",
+  "model_path": "/gpfs/home4/scur2879/DesignProject/SystemModelling/gp_narx_runs_combined/na10_nb7/gp_narx_bundle_na10_nb7.joblib",
+  "run_dir": "/gpfs/home4/scur2879/DesignProject/SystemModelling/gp_narx_runs_combined/na10_nb7",
+  "pred_submission_path": "/gpfs/home4/scur2879/DesignProject/SystemModelling/gp_narx_runs_combined/na10_nb7/gp_hidden_prediction_submission.npz",
+  "sim_submission_path": "/gpfs/home4/scur2879/DesignProject/SystemModelling/gp_narx_runs_combined/na10_nb7/gp_hidden_simulation_submission.npz"
+}

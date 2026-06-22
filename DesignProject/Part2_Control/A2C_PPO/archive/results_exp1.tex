@@ -1,0 +1,90 @@
+\subsection{Results}
+\label{sec:exp1}
+
+We trained PPO and A2C across all combinations of three design choices: the
+reward function (the \emph{base} task reward vs.\ the \emph{tuned} shaped
+reward), the observation encoding (raw $[\theta,\omega]$ vs.\ the
+wrap-invariant $[\sin\theta,\cos\theta,\omega]$), and the disturbance setting
+(nominal vs.\ \emph{robust} training with actuator noise and dropped commands).
+Each configuration was run with \textbf{six random seeds} (42--47); every run
+was capped at $10^6$ steps with early stopping, which also halted training as
+soon as the evaluation return reached $180$ (i.e.\ $0.9\times$ the maximum
+attainable return of $200$). We report, aggregated as mean~$\pm$~std over seeds,
+the environment steps trained, the wall-clock training time, and the mean return
+over 10 evaluation episodes (Table~\ref{tab:exp1}); the design is paired
+(matched seeds), so the comparisons in Table~\ref{tab:exp1_tests} are run within
+seed blocks using the Wilcoxon signed-rank test with bootstrap confidence
+intervals.
+
+\input{tables_exp1.tex}
+
+\paragraph{PPO decisively outperforms A2C.}
+PPO reaches a mean return of $172.6$ (median $180.5$) against A2C's $66.0$
+(median $92.2$), while training about four times faster ($3.0$ vs.\ $12.6$ min).
+The separation is clean: A2C's \emph{best} single run ($137.1$) still falls
+below PPO's \emph{worst} ($145.5$), and $15$ of the $36$ A2C runs effectively
+fail to learn the swing-up (return $<30$). The advantage is large and
+significant in the paired test (\mbox{$\Delta=+106.6$}, 95\%~CI
+$[+93,+119]$, $d_z=2.6$, Wilcoxon $p<10^{-10}$; Table~\ref{tab:exp1_tests}), and
+since the PPO side is censored at the $180$ cap this gap is in fact a
+\emph{lower bound}. A2C is also far less reproducible: a Levene test rejects
+equal variance ($p=1.7\times10^{-5}$; std.\ $36.1$ vs.\ $12.3$), with per-config
+seed spread reaching a coefficient of variation of ${\sim}78\%$ for A2C against
+${\le}4\%$ for PPO. On this task A2C is therefore not competitive.
+
+\paragraph{A censored ceiling near $180$.}
+The strong PPO configurations converge to almost exactly the early-stopping cap
+($\approx 181$): $22$ of the $72$ runs --- \emph{all} of them PPO\,$\cdot$\,sin/cos
+--- hit $180$ and were stopped, so their reported return is right-censored. Final
+return therefore cannot rank these configurations against each other (they are
+equal by construction), and the only fair discriminator is how \emph{quickly} and
+how \emph{reliably} each reaches the cap. On steps-to-threshold the best
+controller is \texttt{PPO, tuned reward, sin/cos, nominal}, which reaches $180$ in
+$167$k steps ($1.4$ min) on all $6$ seeds.
+
+\paragraph{The sin/cos encoding is the one decisive design factor.}
+For PPO, the wrap-invariant encoding yields a real and significant return gain
+over the raw angle (\mbox{$\Delta=+23.9$}, 95\%~CI $[+19,+29]$, $d_z=2.7$,
+$p<10^{-3}$); because the sin/cos side is censored, the true gain is again at
+least this large. Reward shaping is at most second-order for PPO
+(\mbox{$\Delta=+5.0$}, $p=0.027$) and irrelevant for A2C. For A2C the sin/cos
+encoding actually \emph{hurts} ($\Delta=-32.9$, $p=0.032$), consistent with the
+weaker learner struggling with the harder-to-exploit representation.
+
+\paragraph{Robust training is effective but not free.}
+Robust-trained PPO still reaches the cap, so it costs no \emph{final return}
+(\mbox{$\Delta=-1.3$}, CI $[-3.4,+0.2]$, $p=1.0$) --- but this apparent
+``no-cost'' result is an artifact of censoring. On the uncensored metric the
+trade is visible: robust training needs more steps to reach $180$ (e.g.\
+$167$k\,$\to$\,$342$k for the tuned reward) and, in that setting, only $4/6$
+seeds reach the cap at all (vs.\ $6/6$ nominal). Robust training therefore buys
+disturbance tolerance for sim-to-real at a sample-efficiency and reliability
+cost, rather than for free.
+
+\paragraph{More compute did not help.}
+Return correlates negatively with training time ($r=-0.81$ across all runs,
+$r=-0.62$ within PPO): the longest runs are the failed A2C runs that trained for
+many minutes yet scored low, while the best PPO controllers hit the cap and
+stopped within a couple of minutes. Performance is thus set by the algorithm and
+the observation encoding rather than by the compute budget, and early stopping
+correctly halted converged runs well before the $10^6$-step limit. Reporting
+mean~$\pm$~std over six seeds removes the single-seed confound of the earlier
+write-up, turning the previously ``confounded'' secondary effects into the
+quantified, significance-tested results above.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.8\linewidth]{figures/algo_comparison.png}
+\caption{PPO vs.\ A2C on mean return, training time, and steps trained. Bars
+show the per-algorithm mean over all runs and seeds; dots show individual runs.}
+\label{fig:exp1_algo}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.8\linewidth]{figures/effect_sizes.png}
+\caption{Effect sizes of each paired comparison: mean difference in return with
+95\% bootstrap confidence intervals. Green = significant gain, red = loss,
+grey = interval spans zero (tie).}
+\label{fig:exp1_effects}
+\end{figure}
