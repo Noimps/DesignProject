@@ -1,0 +1,5 @@
+timestamp,name,algo,seed,base_reward,robust,sin_cos,num_timesteps,train_time_s,train_time_min,mean_reward,reference,ref_angle
+2026-06-22T10:01:59,ppo_reference_15deg,ppo,44,True,True,True,950000,679.0,11.32,177.271,True,15
+2026-06-22T10:14:07,ppo_reference_20deg,ppo,44,True,True,True,1001472,719.5,11.99,177.647,True,20
+2026-06-22T10:25:03,ppo_reference_25deg,ppo,44,True,True,True,775000,647.4,10.79,61.719,True,25
+2026-06-22T10:36:24,ppo_reference_-15deg,ppo,44,True,True,True,1001472,620.0,10.33,175.893,True,-15
