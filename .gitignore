@@ -19,9 +19,8 @@ env/
 # Jupyter
 .ipynb_checkpoints/
 
-# Logs
-*.log
-logs/
+.venv/
+
 
 # Keep model weights trackable
 # Do NOT ignore: *.pt, *.pth
