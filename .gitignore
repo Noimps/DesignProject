@@ -32,15 +32,6 @@ outputs/
 runs/
 wandb/
 
-# Generated plots/results
-*.jpg
-*.jpeg
-*.pdf
-*.svg
-
-# Large generated data files
-*.npy
-*.npz
 
 # Archives
 *.tar

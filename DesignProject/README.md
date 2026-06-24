@@ -47,7 +47,7 @@ From the repository root, create a virtual environment and install everything in
 one shot — `requirements.txt` is a full pin of a known-good environment and
 includes the editable `gym-unbalanced-disk` package:
 ```
-python3.12 -m venv .venv
+uv venv --python 3.12 .venv        
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
