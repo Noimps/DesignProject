@@ -33,7 +33,6 @@ runs/
 wandb/
 
 # Generated plots/results
-*.png
 *.jpg
 *.jpeg
 *.pdf
